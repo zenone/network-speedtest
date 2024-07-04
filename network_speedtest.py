@@ -1,7 +1,6 @@
 import speedtest
 import datetime
 from termcolor import colored
-import emoji
 from ping3 import ping
 import socket
 import requests
@@ -14,13 +13,10 @@ def calculate_packet_loss(host_ip, count=4):
     return packet_loss_percentage
 
 def calculate_ping_statistics(host_ip, count=4):
-    pings = [ping(host_ip) for _ in range(count) if ping(host_ip) is not None]
+    pings = [ping(host_ip) * 1000 for _ in range(count) if ping(host_ip) is not None]
     if not pings:
         return 'N/A', 'N/A', 'N/A', 'N/A'
-    
-    pings = [p * 1000 for p in pings]
-    low = min(pings)
-    high = max(pings)
+    low, high = min(pings), max(pings)
     avg = sum(pings) / len(pings)
     jitter = high - low
     return low, high, avg, jitter
