@@ -13,7 +13,8 @@ def calculate_packet_loss(host_ip, count=4):
     return packet_loss_percentage
 
 def calculate_ping_statistics(host_ip, count=4):
-    pings = [ping(host_ip) * 1000 for _ in range(count) if ping(host_ip) is not None]
+    pings = [ping(host_ip) for _ in range(count)]
+    pings = [p * 1000 for p in pings if p is not None]
     if not pings:
         return 'N/A', 'N/A', 'N/A', 'N/A'
     low, high = min(pings), max(pings)
@@ -74,49 +75,39 @@ def perform_speedtest_with_retries(st, test_type, retries):
 def perform_speedtest(num_tests=1, retries=3, ping_retries=3):
     try:
         st = speedtest.Speedtest()
-    except Exception as e:
+    except speedtest.SpeedtestException as e:
         print(colored(f"Failed to retrieve configuration: {e} ❌", "red"))
         return
 
-    best_server = None
-    server_ip = None
-    tried_servers = set()
-    successful_server_selection = False
+    def select_best_server(st, ping_retries):
+        tried_servers = set()
+        for _ in range(ping_retries):
+            try:
+                print(colored("Selecting the best server... 🔍", "blue"))
+                best_server = st.get_best_server()
+                server_host = best_server.get('host', 'N/A').split(':')[0]
+                if server_host in tried_servers:
+                    print(colored(f"Already tried server {server_host}. Trying another server... ❌", "red"))
+                    continue
+                server_ip = resolve_host_ip(server_host)
+                if not server_ip:
+                    print(colored(f"Failed to resolve server IP for {server_host}. ❌", "red"))
+                    tried_servers.add(server_host)
+                    continue
+                print(colored(f"Pinging the server {server_host} ({server_ip})... 🏓", "blue"))
+                if ping(server_ip) is None:
+                    print(colored(f"Failed to ping server {server_host} ({server_ip}). Trying another server... ❌", "red"))
+                    tried_servers.add(server_host)
+                    continue
+                print(colored(f"Selected Server: {server_host} ({server_ip})", "green"))
+                return best_server, server_ip
+            except speedtest.SpeedtestException as e:
+                print(colored(f"Failed to retrieve server: {e} ❌", "red"))
+        return None, resolve_host_ip("google.com")
 
-    for _ in range(ping_retries):
-        try:
-            print(colored("Selecting the best server... 🔍", "blue"))
-            best_server = st.get_best_server()
-            server_host = best_server.get('host', 'N/A').split(':')[0]
-            if server_host in tried_servers:
-                print(colored(f"Already tried server {server_host}. Trying another server... ❌", "red"))
-                continue
-            server_ip = resolve_host_ip(server_host)
-            if not server_ip:
-                print(colored(f"Failed to resolve server IP for {server_host}. ❌", "red"))
-                tried_servers.add(server_host)
-                continue
-            server_name = best_server.get('name', 'N/A')
-            server_country = best_server.get('country', 'N/A')
-            server_latency = best_server.get('latency', 'N/A')
-            print(colored(f"Pinging the server {server_host} ({server_ip})... 🏓", "blue"))
-            ping_response = ping(server_ip)
-            if ping_response is None:
-                print(colored(f"Failed to ping server {server_host} ({server_ip}). Trying another server... ❌", "red"))
-                tried_servers.add(server_host)
-                continue
-            print(colored(f"Selected Server: {server_host} ({server_ip}) located in {server_name}, {server_country} (Latency: {server_latency} ms) 🌐", "green"))
-            successful_server_selection = True
-            break
-        except Exception as e:
-            print(colored(f"Failed to retrieve server: {e} ❌", "red"))
-
-    if not successful_server_selection:
+    best_server, server_ip = select_best_server(st, ping_retries)
+    if not best_server:
         print(colored("Failed to find a suitable server after multiple attempts. Using Google for ping tests and best server for speedtest. ❌", "red"))
-        server_ip = resolve_host_ip("google.com")
-        ping_fallback = True
-    else:
-        ping_fallback = False
 
     total_download_speed = 0
     total_upload_speed = 0
@@ -131,8 +122,6 @@ def perform_speedtest(num_tests=1, retries=3, ping_retries=3):
             total_download_speed += download_speed
             total_download_data += download_data
             print(colored(f"Download test {i + 1} complete: {download_speed:.2f} Mbps 🎉 (Data Used: {download_data:.2f} MB)", "green"))
-        else:
-            continue
 
         print(colored(f"Testing upload speed (test {i + 1}/{num_tests})... ⬆️", "blue"))
         upload_speed, upload_data = perform_speedtest_with_retries(st, 'upload', retries)
@@ -204,11 +193,10 @@ def perform_speedtest(num_tests=1, retries=3, ping_retries=3):
     print(f"| {pad(f'Idle (avg): {format_value(idle_avg)} ms (Low: {format_value(idle_low)} ms, High: {format_value(idle_high)} ms, Jitter: {format_value(idle_jitter)} ms)', max_width)} |")
     print(f"| {pad(f'Download Ping (avg): {format_value(download_avg)} ms (Low: {format_value(download_low)} ms, High: {format_value(download_high)} ms, Jitter: {format_value(download_jitter)} ms)', max_width)} |")
     print(f"| {pad(f'Upload Ping (avg): {format_value(upload_avg)} ms (Low: {format_value(upload_low)} ms, High: {format_value(upload_high)} ms, Jitter: {format_value(upload_jitter)} ms)', max_width)} |")
-    if ping_fallback:
-        print(f"+{'-' * (max_width + 2)}+")
+    print(f"+{'-' * (max_width + 2)}+")
+    if not best_server:
         print(f"| {pad('Ping tests used Google as a fallback.', max_width)} |")
     else:
-        print(f"+{'-' * (max_width + 2)}+")
         print(f"| {pad('Ping tests used the selected server.', max_width)} |")
     print(f"+{'-' * (max_width + 2)}+")
 
@@ -222,7 +210,7 @@ def perform_speedtest(num_tests=1, retries=3, ping_retries=3):
                       f"Download Ping (avg): {format_value(download_avg)} ms (Low: {format_value(download_low)} ms, High: {format_value(download_high)} ms, Jitter: {format_value(download_jitter)} ms), "
                       f"Upload Ping (avg): {format_value(upload_avg)} ms (Low: {format_value(upload_low)} ms, High: {format_value(upload_high)} ms, Jitter: {format_value(upload_jitter)} ms), "
                       f"Connection Type: {connection_type}, Device: {device_type}, Internal IP: {internal_ip}, External IP: {external_ip}, Location: {location}\n")
-    except Exception as e:
+    except IOError as e:
         print(colored(f"Failed to log results: {e} ❌", "red"))
 
 if __name__ == "__main__":
