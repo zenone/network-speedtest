@@ -5,16 +5,28 @@ from ping3 import ping
 import socket
 import requests
 import platform
+import logging
+
+logging.basicConfig(filename='speedtest_results.log', level=logging.INFO,
+                    format='%(asctime)s:%(levelname)s:%(message)s')
+
 
 def calculate_packet_loss(host_ip, count=4):
+    """
+    Calculates packet loss percentage by pinging the host multiple times.
+    """
     responses = [ping(host_ip) for _ in range(count)]
     lost_packets = responses.count(None)
     packet_loss_percentage = (lost_packets / count) * 100
     return packet_loss_percentage
 
+
 def calculate_ping_statistics(host_ip, count=4):
+    """
+    Calculates low, high, average, and jitter for ping responses.
+    """
     pings = [ping(host_ip) for _ in range(count)]
-    pings = [p * 1000 for p in pings if p is not None]
+    pings = [p * 1000 for p in pings if p is not None]  # Convert to ms
     if not pings:
         return 'N/A', 'N/A', 'N/A', 'N/A'
     low, high = min(pings), max(pings)
@@ -22,7 +34,11 @@ def calculate_ping_statistics(host_ip, count=4):
     jitter = high - low
     return low, high, avg, jitter
 
+
 def get_connection_type():
+    """
+    Returns the type of internet connection by querying an external service.
+    """
     try:
         response = requests.get("https://ipinfo.io", timeout=5)
         data = response.json()
@@ -30,20 +46,36 @@ def get_connection_type():
     except requests.RequestException:
         return 'Unknown Provider'
 
+
 def get_internal_ip():
+    """
+    Returns the internal IP address of the machine.
+    """
     return socket.gethostbyname(socket.gethostname())
 
+
 def get_external_ip():
+    """
+    Returns the external IP address by querying an external service.
+    """
     try:
         response = requests.get("https://api.ipify.org", timeout=5)
         return response.text
     except requests.RequestException:
         return 'N/A'
 
+
 def get_device_type():
-    return platform.system() + " " + platform.release()
+    """
+    Returns the type and version of the operating system.
+    """
+    return f"{platform.system()} {platform.release()}"
+
 
 def get_location():
+    """
+    Returns the geolocation based on the external IP address.
+    """
     try:
         response = requests.get("https://ipinfo.io", timeout=5)
         data = response.json()
@@ -51,28 +83,40 @@ def get_location():
     except requests.RequestException:
         return 'N/A'
 
+
 def resolve_host_ip(host):
+    """
+    Resolves and returns the IP address for a given host.
+    """
     try:
         return socket.gethostbyname(host)
     except socket.gaierror:
         return None
 
+
 def perform_speedtest_with_retries(st, test_type, retries):
+    """
+    Attempts to perform a speedtest with retries.
+    """
     for attempt in range(retries):
         try:
             if test_type == 'download':
-                speed = st.download() / 1_000_000
-                data_used = st.results.bytes_received / 1_000_000
+                speed = st.download() / 1_000_000  # Convert to Mbps
+                data_used = st.results.bytes_received / 1_000_000  # Convert to MB
             elif test_type == 'upload':
-                speed = st.upload() / 1_000_000
-                data_used = st.results.bytes_sent / 1_000_000
+                speed = st.upload() / 1_000_000  # Convert to Mbps
+                data_used = st.results.bytes_sent / 1_000_000  # Convert to MB
             return speed, data_used
         except speedtest.SpeedtestException as e:
             print(colored(f"Speedtest exception during {test_type} test (attempt {attempt + 1}/{retries}): {e} ❌", "red"))
     print(colored(f"{test_type.capitalize()} test failed after {retries} attempts. ❌", "red"))
     return None, None
 
+
 def perform_speedtest(num_tests=1, retries=3, ping_retries=3):
+    """
+    Conducts a series of speedtests and pings, logging and displaying results.
+    """
     try:
         st = speedtest.Speedtest()
     except speedtest.SpeedtestException as e:
@@ -80,6 +124,9 @@ def perform_speedtest(num_tests=1, retries=3, ping_retries=3):
         return
 
     def select_best_server(st, ping_retries):
+        """
+        Selects the best server for speedtest by pinging potential candidates.
+        """
         tried_servers = set()
         for _ in range(ping_retries):
             try:
@@ -142,9 +189,7 @@ def perform_speedtest(num_tests=1, retries=3, ping_retries=3):
     avg_upload_data = total_upload_data / successful_tests
 
     packet_loss = calculate_packet_loss(server_ip)
-    idle_low, idle_high, idle_avg, idle_jitter = calculate_ping_statistics(server_ip)
-    download_low, download_high, download_avg, download_jitter = calculate_ping_statistics(server_ip)
-    upload_low, upload_high, upload_avg, upload_jitter = calculate_ping_statistics(server_ip)
+    low_ping, high_ping, avg_ping, jitter = calculate_ping_statistics(server_ip)
 
     connection_type = get_connection_type()
     internal_ip = get_internal_ip()
@@ -171,47 +216,45 @@ def perform_speedtest(num_tests=1, retries=3, ping_retries=3):
                     len(f"Download (avg): {avg_download_speed:.2f} Mbps (Data Used: {avg_download_data:.2f} MB)"),
                     len(f"Upload (avg): {avg_upload_speed:.2f} Mbps (Data Used: {avg_upload_data:.2f} MB)"),
                     len(f"Packet Loss: {packet_loss:.2f}%"),
-                    len(f"Idle (avg): {format_value(idle_avg)} ms (Low: {format_value(idle_low)} ms, High: {format_value(idle_high)} ms, Jitter: {format_value(idle_jitter)} ms)"),
-                    len(f"Download Ping (avg): {format_value(download_avg)} ms (Low: {format_value(download_low)} ms, High: {format_value(download_high)} ms, Jitter: {format_value(download_jitter)} ms)"),
-                    len(f"Upload Ping (avg): {format_value(upload_avg)} ms (Low: {format_value(upload_low)} ms, High: {format_value(upload_high)} ms, Jitter: {format_value(upload_jitter)} ms)"))
+                    len(f"Ping (avg): {format_value(avg_ping)} ms (Low: {format_value(low_ping)} ms, High: {format_value(high_ping)} ms, Jitter: {format_value(jitter)} ms)"))
 
-    print(f"+{'-' * (max_width + 2)}+")
-    print(f"| {pad('Date: ' + now, max_width)} |")
-    print(f"| {pad(f'Server: {best_server["host"]} ({server_ip}) (Latency: {best_server["latency"]:.3f} ms)', max_width)} |")
-    print(f"| {pad(f'Server Location: {best_server["name"]}, {best_server["country"]}', max_width)} |")
-    print(f"+{'-' * (max_width + 2)}+")
-    print(f"| {pad(f'Connection Type: {connection_type}', max_width)} |")
-    print(f"| {pad(f'Device: {device_type}', max_width)} |")
-    print(f"| {pad(f'Internal IP: {internal_ip}', max_width)} |")
-    print(f"| {pad(f'External IP: {external_ip}', max_width)} |")
-    print(f"| {pad(f'Location: {location}', max_width)} |")
-    print(f"+{'-' * (max_width + 2)}+")
-    print(f"| {pad(f'Download (avg): {avg_download_speed:.2f} Mbps (Data Used: {avg_download_data:.2f} MB)', max_width)} |")
-    print(f"| {pad(f'Upload (avg): {avg_upload_speed:.2f} Mbps (Data Used: {avg_upload_data:.2f} MB)', max_width)} |")
-    print(f"+{'-' * (max_width + 2)}+")
-    print(f"| {pad(f'Packet Loss: {packet_loss:.2f}%', max_width)} |")
-    print(f"| {pad(f'Idle (avg): {format_value(idle_avg)} ms (Low: {format_value(idle_low)} ms, High: {format_value(idle_high)} ms, Jitter: {format_value(idle_jitter)} ms)', max_width)} |")
-    print(f"| {pad(f'Download Ping (avg): {format_value(download_avg)} ms (Low: {format_value(download_low)} ms, High: {format_value(download_high)} ms, Jitter: {format_value(download_jitter)} ms)', max_width)} |")
-    print(f"| {pad(f'Upload Ping (avg): {format_value(upload_avg)} ms (Low: {format_value(upload_low)} ms, High: {format_value(upload_high)} ms, Jitter: {format_value(upload_jitter)} ms)', max_width)} |")
-    print(f"+{'-' * (max_width + 2)}+")
-    if not best_server:
-        print(f"| {pad('Ping tests used Google as a fallback.', max_width)} |")
-    else:
-        print(f"| {pad('Ping tests used the selected server.', max_width)} |")
-    print(f"+{'-' * (max_width + 2)}+")
+    output = [
+        f"+{'-' * (max_width + 2)}+",
+        f"| {pad('Date: ' + now, max_width)} |",
+        f"| {pad(f'Server: {best_server["host"]} ({server_ip}) (Latency: {best_server["latency"]:.3f} ms)', max_width)} |",
+        f"| {pad(f'Server Location: {best_server["name"]}, {best_server["country"]}', max_width)} |",
+        f"+{'-' * (max_width + 2)}+",
+        f"| {pad(f'Connection Type: {connection_type}', max_width)} |",
+        f"| {pad(f'Device: {device_type}', max_width)} |",
+        f"| {pad(f'Internal IP: {internal_ip}', max_width)} |",
+        f"| {pad(f'External IP: {external_ip}', max_width)} |",
+        f"| {pad(f'Location: {location}', max_width)} |",
+        f"+{'-' * (max_width + 2)}+",
+        f"| {pad(f'Download (avg): {avg_download_speed:.2f} Mbps (Data Used: {avg_download_data:.2f} MB)', max_width)} |",
+        f"| {pad(f'Upload (avg): {avg_upload_speed:.2f} Mbps (Data Used: {avg_upload_data:.2f} MB)', max_width)} |",
+        f"+{'-' * (max_width + 2)}+",
+        f"| {pad(f'Packet Loss: {packet_loss:.2f}%', max_width)} |",
+        f"| {pad(f'Ping (avg): {format_value(avg_ping)} ms (Low: {format_value(low_ping)} ms, High: {format_value(high_ping)} ms, Jitter: {format_value(jitter)} ms)', max_width)} |",
+        f"+{'-' * (max_width + 2)}+",
+        f"| {pad('Ping tests used the selected server.', max_width)} |" if best_server else f"| {pad('Ping tests used Google as a fallback.', max_width)} |",
+        f"+{'-' * (max_width + 2)}+"
+    ]
+
+    for line in output:
+        print(line)
 
     try:
         with open("speedtest_results.log", "a") as log:
-            log.write(f"{now}: Selected Server: {best_server['host']} ({server_ip}) located in {best_server['name']}, {best_server['country']} (Latency: {best_server['latency']} ms), "
+            log.write(f"{now}: Selected Server: {best_server['host']} ({server_ip}) located in {best_server['name']}, "
+                      f"{best_server['country']} (Latency: {best_server['latency']} ms), "
                       f"Average Download: {avg_download_speed:.2f} Mbps (Data Used: {avg_download_data:.2f} MB), "
                       f"Average Upload: {avg_upload_speed:.2f} Mbps (Data Used: {avg_upload_data:.2f} MB), "
                       f"Packet Loss: {packet_loss:.2f}%, "
-                      f"Idle (avg): {format_value(idle_avg)} ms (Low: {format_value(idle_low)} ms, High: {format_value(idle_high)} ms, Jitter: {format_value(idle_jitter)} ms), "
-                      f"Download Ping (avg): {format_value(download_avg)} ms (Low: {format_value(download_low)} ms, High: {format_value(download_high)} ms, Jitter: {format_value(download_jitter)} ms), "
-                      f"Upload Ping (avg): {format_value(upload_avg)} ms (Low: {format_value(upload_low)} ms, High: {format_value(upload_high)} ms, Jitter: {format_value(upload_jitter)} ms), "
+                      f"Ping (avg): {format_value(avg_ping)} ms (Low: {format_value(low_ping)} ms, High: {format_value(high_ping)} ms, Jitter: {format_value(jitter)} ms), "
                       f"Connection Type: {connection_type}, Device: {device_type}, Internal IP: {internal_ip}, External IP: {external_ip}, Location: {location}\n")
     except IOError as e:
         print(colored(f"Failed to log results: {e} ❌", "red"))
+
 
 if __name__ == "__main__":
     perform_speedtest(num_tests=3, retries=3)
